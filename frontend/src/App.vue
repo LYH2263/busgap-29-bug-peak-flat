@@ -5,16 +5,30 @@ import { api } from './api'
 
 const marks = ref<any[]>([])
 const stopName = ref('')
+const peakConfigured = ref(false)
+const peakBand = ref<any>(null)
 
 onMounted(async () => {
   try {
     const data = await api('/reports/timeline?line_id=1')
     marks.value = data.marks || []
     stopName.value = data.stop_name || ''
+    peakConfigured.value = !!data.peak_configured
+    peakBand.value = data.peak_band || null
   } catch {
     marks.value = []
   }
 })
+
+function dotClass(m: any) {
+  // 未配高峰保持早期:前 15% 标紧;配了高峰按本次真用尺子着色
+  if (!peakConfigured.value) return m.pct < 15 ? 'bg-bus-tight' : ''
+  return m.ruler === 'peak' ? 'bg-bus-peak' : ''
+}
+function dotTitle(m: any) {
+  const ruler = peakConfigured.value ? (m.ruler === 'peak' ? ' · 高峰尺' : ' · 平峰尺') : ''
+  return `${m.trip_no} ${m.actual_arrive}${ruler}`
+}
 </script>
 <template>
   <div class="bg-shell">
@@ -29,12 +43,17 @@ onMounted(async () => {
         </div>
         <div class="bg-rail-track">
           <div
+            v-if="peakBand"
+            class="bg-peak-band"
+            :style="{ left: peakBand.start_pct + '%', width: (peakBand.end_pct - peakBand.start_pct) + '%' }"
+          />
+          <div
             v-for="m in marks"
             :key="m.trip_no"
             class="bg-bus-dot"
-            :class="{ 'bg-bus-tight': m.pct < 15 }"
+            :class="dotClass(m)"
             :style="{ left: m.pct + '%' }"
-            :title="`${m.trip_no} ${m.actual_arrive}`"
+            :title="dotTitle(m)"
           >
             <span class="bg-bus-label">{{ m.trip_no }}</span>
           </div>

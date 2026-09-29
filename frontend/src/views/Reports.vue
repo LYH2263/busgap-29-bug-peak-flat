@@ -21,6 +21,12 @@ function stripClass(s: string) {
 function label(s: string) {
   return unifyStatusLabel(s)
 }
+function rulerName(e: any) {
+  // 与后端 suggestion 同源:本次真用哪把尺子就写哪个
+  if (e.period === 'peak') return `高峰计划 ${e.planned_headway_min}′`
+  if (e.period === 'offpeak') return `平峰计划 ${e.planned_headway_min}′`
+  return `计划 ${e.planned_headway_min}′`
+}
 </script>
 <template>
   <h1>串车报告</h1>
@@ -47,7 +53,7 @@ function label(s: string) {
         <header>{{ e.stop_name }}</header>
         <div class="bg-gap-body">
           <div class="bg-gap-val">{{ e.gap_min }}′</div>
-          <div>高峰计划 {{ e.planned_headway_min }}′</div>
+          <div>{{ rulerName(e) }}</div>
           <div>{{ e.earlier_trip }} → {{ e.later_trip }}</div>
           <span class="badge" :class="e.status === 'bunching' ? 'badge-bad' : e.status === 'large_gap' ? 'badge-warn' : 'badge-ok'">
             {{ label(e.status) }}

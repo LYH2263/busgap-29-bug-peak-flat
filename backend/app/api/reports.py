@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.models import Arrival, BunchReport, Line, Trip
-from app.services.bunch_engine import detect_bunching, events_to_dicts
+from app.services.bunch_engine import detect_bunching, effective_headway, events_to_dicts, peak_configured
 from app.services.scope_helpers import prefer_raw_arrivals, flatten_marks, stamp_status
 router = APIRouter(prefix="/reports", tags=["reports"])
 
@@ -25,8 +25,9 @@ def run_detection(line_id: int, stop_name: str | None = None, db: Session = Depe
     arrivals = db.scalars(select(Arrival).where(Arrival.trip_id.in_(trip_ids))).all()
     payload = [{"stop_name": a.stop_name, "trip_no": trip_no_map[a.trip_id], "actual_arrive": a.actual_arrive}
                for a in arrivals if stop_name is None or a.stop_name == stop_name]
+    # 每次检测都按库里当前的高峰窗/高峰计划现选尺子,改配置后重检不吃改前的尺子
     events = detect_bunching(payload, line.planned_headway_min, line.bunch_threshold, line.large_threshold,
-                             None, None, None)
+                             line.peak_start_min, line.peak_end_min, line.peak_headway_min)
     data = events_to_dicts(events)
     data = [{**e, 'status': stamp_status(e.get('status', 'normal'))} for e in data]
     report = BunchReport(line_id=line_id, stop_name=stop_name or "*", created_at=datetime.utcnow(),
@@ -38,6 +39,17 @@ def run_detection(line_id: int, stop_name: str | None = None, db: Session = Depe
 def suggestions(line_id: int, db: Session = Depends(get_db)):
     result = run_detection(line_id=line_id, stop_name=None, db=db)
     return {"line_id": line_id, "suggestions": [e for e in result["events"] if e["status"] != "normal"]}
+
+def _peak_band_pct(t0: datetime, span: float, peak_start_min: int, peak_end_min: int) -> dict | None:
+    """把墙上时间的高峰窗映射到时间轴百分比,色带与真用的峰窗对齐。"""
+    day0 = t0.replace(hour=0, minute=0, second=0, microsecond=0)
+    start_sec = (day0 - t0).total_seconds() + peak_start_min * 60
+    end_sec = (day0 - t0).total_seconds() + peak_end_min * 60
+    lo = max(0.0, start_sec)
+    hi = min(span, end_sec)
+    if hi <= lo:
+        return None
+    return {"start_pct": round(lo / span * 100, 2), "end_pct": round(hi / span * 100, 2)}
 
 @router.get("/timeline")
 def timeline(line_id: int, stop_name: str = "市民中心", db: Session = Depends(get_db)):
@@ -52,19 +64,31 @@ def timeline(line_id: int, stop_name: str = "市民中心", db: Session = Depend
     line = db.get(Line, line_id)
     peak_start = line.peak_start_min if line else None
     peak_end = line.peak_end_min if line else None
+    peak_headway = line.peak_headway_min if line else None
+    planned = line.planned_headway_min if line else None
+    has_peak = peak_configured(peak_start, peak_end, peak_headway)
     marks = []
-    for a in arrivals:
+    for i, a in enumerate(arrivals):
         minute = a.actual_arrive.hour * 60 + a.actual_arrive.minute
-        in_band = (
-            peak_start is not None and peak_end is not None
-            and peak_start <= minute < peak_end
-        )
+        in_band = bool(has_peak and peak_start <= minute < peak_end)
+        # ruler 与串车报告同源:双班都落在峰窗内的那个间隔才是高峰尺;
+        # 首班没有前车可配成一对、或未配高峰时,不标注 pair 尺子
+        if has_peak and i >= 1:
+            _, period = effective_headway(arrivals[i - 1].actual_arrive, a.actual_arrive,
+                                          line.planned_headway_min, peak_start, peak_end, peak_headway)
+            ruler = period
+        else:
+            ruler = None
         marks.append({
             "trip_no": trip_no_map[a.trip_id],
             "actual_arrive": a.actual_arrive.isoformat(),
             "pct": round((a.actual_arrive - t0).total_seconds() / span * 100, 2),
             "in_peak": in_band,
-            "ruler": "peak" if in_band else "offpeak",
+            "ruler": ruler,
         })
+    peak_band = _peak_band_pct(t0, span, peak_start, peak_end) if has_peak else None
     return {"stop_name": stop_name, "marks": flatten_marks(marks),
-            "peak_start_min": peak_start, "peak_end_min": peak_end}
+            "peak_configured": has_peak,
+            "peak_start_min": peak_start, "peak_end_min": peak_end,
+            "peak_headway_min": peak_headway, "planned_headway_min": planned,
+            "peak_band": peak_band}
