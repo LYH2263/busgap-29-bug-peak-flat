@@ -7,7 +7,7 @@ onMounted(async () => { tips.value = (await api('/reports/suggestions?line_id=1'
 </script>
 <template>
   <h1>建议</h1>
-  <p class="sub">高峰窗内仍按平峰尺子给出的调班提示</p>
+  <p class="sub">按本次实际尺子（双班均在高峰窗才用高峰计划，否则平峰计划）给出的调班提示</p>
   <div class="card" v-for="(t,i) in tips" :key="i">
     <div><strong>{{ t.stop_name }}</strong> · {{ t.earlier_trip }} → {{ t.later_trip }} · 间隔 {{ t.gap_min }} 分</div>
     <p class="muted">{{ t.suggestion }}</p>

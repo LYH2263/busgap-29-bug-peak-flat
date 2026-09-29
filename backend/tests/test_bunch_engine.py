@@ -65,3 +65,39 @@ def test_detect_bunching_with_peak_config():
     assert "高峰计划" in events[0].suggestion
     assert events[1].planned_headway_min == 8.0
     assert events[1].status == "large_gap"
+
+# --- 改窗 / 改高峰计划后再检必须重新选尺, 禁止吃改前尺子 ---
+
+def test_change_window_reselects_ruler():
+    arrivals = [
+        {"stop_name": "A", "trip_no": "T1", "actual_arrive": datetime(2026, 1, 1, 8, 0)},
+        {"stop_name": "A", "trip_no": "T2", "actual_arrive": datetime(2026, 1, 1, 8, 6)},
+    ]
+    peak_events = detect_bunching(arrivals, 8.0, 3.0, 15.0, 420, 540, 5.0)
+    assert (peak_events[0].planned_headway_min, peak_events[0].period) == (5.0, "peak")
+    # 同一对班次, 高峰窗改到别处后必须立即换平峰尺
+    moved_events = detect_bunching(arrivals, 8.0, 3.0, 15.0, 540, 600, 5.0)
+    assert (moved_events[0].planned_headway_min, moved_events[0].period) == (8.0, "offpeak")
+    # 窗不动, 只改高峰计划分钟: 仍在窗内则按新计划
+    new_plan_events = detect_bunching(arrivals, 8.0, 3.0, 15.0, 420, 540, 6.0)
+    assert new_plan_events[0].planned_headway_min == 6.0
+
+def test_both_outside_window_uses_offpeak():
+    arrivals = [
+        {"stop_name": "A", "trip_no": "T1", "actual_arrive": datetime(2026, 1, 1, 12, 0)},
+        {"stop_name": "A", "trip_no": "T2", "actual_arrive": datetime(2026, 1, 1, 12, 8)},
+    ]
+    events = detect_bunching(arrivals, 8.0, 3.0, 15.0, 420, 540, 5.0)
+    assert (events[0].planned_headway_min, events[0].period) == (8.0, "offpeak")
+    assert "平峰计划 8.0" in events[0].suggestion
+
+def test_bunch_inside_peak_records_peak_ruler():
+    # 异常状态不改阈值口径; 事件仍须记录本对真用的高峰尺
+    arrivals = [
+        {"stop_name": "A", "trip_no": "T1", "actual_arrive": datetime(2026, 1, 1, 8, 0)},
+        {"stop_name": "A", "trip_no": "T2", "actual_arrive": datetime(2026, 1, 1, 8, 2)},
+    ]
+    events = detect_bunching(arrivals, 8.0, 3.0, 15.0, 420, 540, 5.0)
+    assert events[0].status == "bunching"
+    assert (events[0].planned_headway_min, events[0].period) == (5.0, "peak")
+

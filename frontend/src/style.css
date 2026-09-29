@@ -191,3 +191,10 @@ input[type="time"]:focus, input[type="number"]:focus { outline: 1px solid var(--
   position: absolute; top: 8px; width: 10px; height: 32px;
   border-radius: 2px; transform: translateX(-50%);
 }
+.tl-peak-band {
+  position: absolute; top: 0; bottom: 0;
+  background: rgba(255, 176, 32, 0.18);
+  border-left: 1px dashed var(--bg-amber);
+  border-right: 1px dashed var(--bg-amber);
+  pointer-events: none;
+}
